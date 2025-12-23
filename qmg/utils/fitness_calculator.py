@@ -1,6 +1,6 @@
 from rdkit import Chem
 from rdkit.Chem import Descriptors
-from rdkit.Contrib.SA_Score import sascorer
+from qmg.third_party.SA_Score import sascorer
 from rdkit.Chem.Crippen import MolLogP, MolMR
 import numpy as np
 from typing import List
