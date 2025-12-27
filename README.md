@@ -10,10 +10,7 @@ This repository requires to operate on **Linux** operating system.
 
 ## Python Dependencies
 * Python (version >= 3.12)
-* qiskit (version >= 1.2.4)
-* qiskit-aer (version >= 0.15.1)
-* qiskit-ibm-runtime (version >= 0.30.0)
-* qiskit-qasm3-import (version >= 0.5.0)
+* cudaq (version == 0.12.0)
 * rdkit (version >= 2024.3.5)
 * matplotlib (version >=3.9.2)
 * pylatexenc (version >= 2.10)
