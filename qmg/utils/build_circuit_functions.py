@@ -5,7 +5,35 @@ from typing import List, Union
 
 
 class CircuitBuilder:
-    """This normal circuit does not support the function of conditional weight or molecular structure generation."""
+    """Non-dynamic circuit version of the molecule generation ansatz using CUDA-Q kernels.
+    
+    This circuit builder creates a static quantum circuit (without mid-circuit
+    measurement-based conditional branches for atom/bond existence). It does
+    however use the "toggle-then-conditionally-untoggle" pattern for bond
+    disconnection removal.
+    
+    Measurement Strategy (Main + Aux Registers):
+    -------------------------------------------
+    - Main register ("c"): Contains the semantic output bits in the expected
+      classical bit order. Use sample_result.get_register_counts("c") to
+      retrieve the primary counts that match the original Qiskit output format.
+    - Aux register ("_all"): Contains measurements of ALL qubits to prevent
+      CUDA-Q from eliding unused qubits. This register is for debugging only
+      and does NOT affect the main output.
+    - Condition register ("_cond"): Temporary register for intermediate
+      condition measurements used in the toggle-untoggle pattern.
+    
+    Toggle-then-conditionally-untoggle Pattern:
+    ------------------------------------------
+    For the bond disconnection removal logic, we want to apply an X gate to
+    a target qubit only if all bond qubits measured as 0. This is implemented
+    by:
+    1. Apply X to target qubit (toggle to 1)
+    2. For each bond qubit: if measured as 1, apply X to untoggle
+    
+    This uses individual c_if calls per measurement handle, conforming to
+    CUDA-Q's requirement that c_if accepts only a single measurement handle.
+    """
 
     def __init__(
         self,
@@ -40,14 +68,8 @@ class CircuitBuilder:
     def controlled_ry(self, control: int, target: int, digit: float):
         self.kernel.cry(np.pi * digit, self.qubits[control], self.qubits[target])
 
-    def _or_measurements(self, handles: List[cudaq.QuakeValue]):
-        assert handles, "At least one measurement handle is required."
-        accumulator = handles[0]
-        for handle in handles[1:]:
-            accumulator = (accumulator + handle) + (accumulator * handle)
-        return accumulator
-
     def ccx(self, control_1: int, control_2: int, target: int):
+        """Apply a Toffoli (CCX) gate using CUDA-Q's control mechanism."""
         base, ctrl, tgt = cudaq.make_kernel(cudaq.qubit, cudaq.qubit)
         base.cx(ctrl, tgt)
         self.kernel.control(
@@ -137,6 +159,17 @@ class CircuitBuilder:
         self.kernel.x(self.qubits[qubit_2_index])
 
     def build_removing_bond_disconnection_circuit(self, heavy_atom_number: int):
+        """Remove bond disconnection by applying toggle-then-conditionally-untoggle.
+        
+        This implements the equivalent of Qiskit's if_test((register, 0)) pattern:
+        - Apply X to target qubit (toggle to 1, assuming no bond)
+        - For each bond measurement: if it's 1, apply X to untoggle
+        
+        The result: target = 1 if all bonds are 0 (no bond exists),
+                    target = 0 if any bond is 1 (bond exists)
+        
+        Each c_if uses a single measurement handle, conforming to CUDA-Q spec.
+        """
         ancilla_qubit_index = 2 * (heavy_atom_number) + (heavy_atom_number - 1) ** 2 - 1
         control_qubits_index_list = list(
             range(
@@ -144,17 +177,31 @@ class CircuitBuilder:
                 ancilla_qubit_index + 1 + 2 * (heavy_atom_number - 1),
             )
         )
+        # Measure each control qubit to the condition register
         cond_handles = [
             self.kernel.mz(self.qubits[idx], "_cond") for idx in control_qubits_index_list
         ]
-        bond_condition = self._or_measurements(cond_handles)
+        
         target_qubit = control_qubits_index_list[-1]
+        # Toggle: Apply X to set target to 1 (assuming no bond)
         self.kernel.x(self.qubits[target_qubit])
-        self.kernel.c_if(
-            bond_condition, lambda idx=target_qubit: self.kernel.x(self.qubits[idx])
-        )
+        
+        # Conditionally untoggle: For each measurement, if it's 1,
+        # untoggle (apply X) to set target back to 0.
+        # This implements: target = 1 if all bonds are 0, else target = 0
+        # Equivalent to original Qiskit if_test((register, 0)) behavior.
+        for handle in cond_handles:
+            self.kernel.c_if(
+                handle, lambda idx=target_qubit: self.kernel.x(self.qubits[idx])
+            )
 
     def measure(self):
+        """Measure all effective qubits to the main and auxiliary registers.
+        
+        The main register contains only the semantic output bits (excluding
+        ancilla qubits), while the auxiliary register contains ALL qubits
+        to prevent elision.
+        """
         effective_qubit_index = list(range(self.num_qubits + self.num_ancilla_qubits))
         for j in range(2, self.num_heavy_atom + 1):
             ancilla_qubit_number = 2 * j + (j - 1) ** 2 - 1
@@ -235,4 +282,5 @@ if __name__ == "__main__":
     qc_generator = CircuitBuilder(num_heavy_atom=3)
     qc = qc_generator.generate_quantum_circuit()
     print(qc)
+
 
