@@ -3,3 +3,4 @@ from .build_circuit_functions import CircuitBuilder
 from .build_dynamic_circuit import DynamicCircuitBuilder
 from .weight_generator import ConditionalWeightsGenerator
 from .fitness_calculator import FitnessCalculator, FitnessCalculatorWrapper
+from .counts import reorder_counts

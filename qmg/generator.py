@@ -12,6 +12,7 @@ from .utils import (
     CircuitBuilder,
     DynamicCircuitBuilder,
     ConditionalWeightsGenerator,
+    reorder_counts,
 )
 
 
@@ -41,24 +42,6 @@ class MoleculeGenerator:
             heavy_atom_size=num_heavy_atom, ncpus=1, sanitize_method="strict"
         )
 
-    def _reorder_counts(self, counts: dict):
-        if not self.measurement_order:
-            return counts
-        if self.measurement_order == list(range(len(self.measurement_order))):
-            return counts
-        reordered = {}
-        for bitstring, value in counts.items():
-            bits = list(str(bitstring))
-            if len(bits) != len(self.measurement_order):
-                reordered[str(bitstring)] = reordered.get(str(bitstring), 0) + value
-                continue
-            arranged = ["0"] * len(self.measurement_order)
-            for position, classical_index in enumerate(self.measurement_order):
-                arranged[classical_index] = bits[position]
-            key = "".join(arranged)
-            reordered[key] = reordered.get(key, 0) + value
-        return reordered
-
     def generate_quantum_circuit(self, random_seed):
         if self.dynamic_circuit:
             builder = DynamicCircuitBuilder(
@@ -77,8 +60,10 @@ class MoleculeGenerator:
         self.qc = builder.generate_quantum_circuit(
             self.all_weight_vector, random_seed
         )
-        self.main_register = getattr(builder, "main_register", "c")
-        self.measurement_order = getattr(builder, "main_measurement_order", [])
+        # Explicit attribute access - builder must provide these attributes.
+        # If missing, this will raise AttributeError to make errors visible.
+        self.main_register = builder.main_register
+        self.measurement_order = builder.main_measurement_order
 
     def update_weight_vector(self, all_weight_vector):
         self.all_weight_vector = all_weight_vector
@@ -92,7 +77,7 @@ class MoleculeGenerator:
             self.qc, shots_count=num_sample, explicit_measurements=False
         )
         raw_counts = sample_result.get_register_counts(self.main_register)
-        counts = self._reorder_counts(dict(raw_counts.items()))
+        counts = reorder_counts(dict(raw_counts.items()), self.measurement_order)
 
         smiles_dict = {}
         num_valid_molecule = 0
@@ -106,7 +91,11 @@ class MoleculeGenerator:
             if smiles:
                 num_valid_molecule += value
         validity = num_valid_molecule / num_sample
-        uniqueness = (len(smiles_dict.keys()) - 1) / num_valid_molecule
+        # Handle case when no valid molecules are found to avoid ZeroDivisionError
+        if num_valid_molecule == 0:
+            uniqueness = 0.0
+        else:
+            uniqueness = (len(smiles_dict.keys()) - 1) / num_valid_molecule
         return smiles_dict, validity, uniqueness
 
 
