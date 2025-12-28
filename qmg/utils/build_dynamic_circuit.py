@@ -214,8 +214,10 @@ class DynamicCircuitBuilder:
             self._ccx(q2, q3, aux2_idx)
             self._ccx(q0, q1, aux1_idx)
         else:
-            # For n > 4, we'd need more complex decomposition
-            # This shouldn't happen in the current molecule generator
+            # For n > 4, we'd need more complex decomposition.
+            # In the current molecule generator, the maximum OR condition is 4 qubits
+            # (for bond checks with heavy_atom_number=5), so this limit is sufficient.
+            # If larger molecules are needed, implement a tree decomposition approach.
             raise ValueError(f"OR condition with {n} qubits not supported (max 4)")
         
         # Restore all input qubits
@@ -303,8 +305,21 @@ class DynamicCircuitBuilder:
         
         For the dynamic circuit, atoms are encoded in 2 qubits. The existence
         of an atom is determined by whether any of these 2 qubits is 1.
+        
+        In this dynamic circuit design, qubits 2 and 3 are REUSED for encoding
+        different atoms after being reset via reset_previous_atom_bond_circuit().
+        Therefore, the existence check for any atom (after the first two atoms)
+        always uses qubits 2 and 3, regardless of heavy_atom_number.
+        
+        Args:
+            heavy_atom_number: The atom number to check existence for.
+                This parameter is accepted for interface consistency but
+                the return value is always [2, 3] due to qubit reuse.
+        
+        Returns:
+            List of qubit indices: always [2, 3] for this circuit design.
         """
-        # Qubits 2,3 for atom 2; for later atoms, they're reused
+        # Qubits 2,3 are reused for all atoms after reset; see circuit design docs
         return [2, 3]
 
     def build_atom_type_circuit(
