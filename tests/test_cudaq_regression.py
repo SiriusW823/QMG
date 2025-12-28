@@ -49,6 +49,11 @@ class DynamicCountsRegressionTest(unittest.TestCase):
         with open(baseline_path) as f:
             baseline = json.load(f)
 
+        # Skip if baseline counts are not populated (placeholder file)
+        expected_counts = baseline.get("counts", {})
+        if not expected_counts or "__NOTE__" in expected_counts:
+            self.skipTest(f"Baseline {baseline_filename} has no valid counts - needs generation")
+
         params = baseline["params"]
         random.seed(params["random_seed"])
         np.random.seed(params["random_seed"])
@@ -94,7 +99,7 @@ class DynamicCountsRegressionTest(unittest.TestCase):
         counts = dict(sample_result.get_register_counts(builder.main_register).items())
         counts = reorder_counts(counts, main_order)
         
-        self.assertEqual(counts, baseline["counts"])
+        self.assertEqual(counts, expected_counts)
 
     def test_dynamic_counts_baseline_seed_0(self):
         """Test dynamic circuit counts match baseline with random_seed=0, num_heavy_atom=3."""
